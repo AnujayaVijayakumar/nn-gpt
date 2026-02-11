@@ -99,11 +99,10 @@ class LocalLLMLoader:
                 pad_token_id=self.tokenizer.pad_token_id
             )
         
-        generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        
-        # Clean up prompt echo
-        if generated_text.startswith(prompt):
-            generated_text = generated_text[len(prompt):]
+        # Decode only the new tokens to avoid prompt echoing issues
+        input_length = inputs.input_ids.shape[1]
+        generated_tokens = outputs[0][input_length:]
+        generated_text = self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
             
         return generated_text.strip()
 

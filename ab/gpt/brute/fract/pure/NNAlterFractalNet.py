@@ -1,6 +1,6 @@
 import argparse
 
-from ab.gpt.brute.fract.AlterNNFN import alter
+from ab.gpt.brute.fract.pure.AlterNNFN import alter
 
 
 def main():

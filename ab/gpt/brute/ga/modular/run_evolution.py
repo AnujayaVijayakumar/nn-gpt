@@ -16,7 +16,7 @@ if project_root not in sys.path:
 from .engine import GeneticAlgorithmEngine
 from .selection import TournamentSelection
 from .crossover import SinglePointCrossover
-from .rl_mutation import RLLLMMutation 
+from .rl_mutation import LLMMutationStrategy 
 from .rl_rewards import evaluate_fitness
 
 # --- Load Seed ---
@@ -42,10 +42,11 @@ except FileNotFoundError:
 # --- Configuration --- according to cluster config
 POPULATION_SIZE = int(os.environ.get("POPULATION_SIZE", 4))
 GENERATIONS = int(os.environ.get("GENERATIONS", 5))
-ELITISM_COUNT = 1
+print(f"[DEBUG] POPULATION_SIZE={POPULATION_SIZE}, GENERATIONS={GENERATIONS}")
+ELITISM_COUNT = 5
 USE_QUANTIZATION = True 
 MUTATION_RATE = float(os.environ.get("MUTATION_RATE", 0.5))
-MODEL_PATH = "deepseek-ai/deepseek-coder-1.3b-instruct"
+MODEL_PATH = "deepseek-ai/deepseek-coder-6.7b-instruct"
 EPOCHS_PER_INDIVIDUAL = 1
 
 # Search Space (Hyperparameters only)
@@ -96,11 +97,23 @@ def main():
     crossover = SinglePointCrossover() 
     
     print(f"Using LLM: {MODEL_PATH} (Quantized: {USE_QUANTIZATION})")
-    mutation = RLLLMMutation(
+    mutation = LLMMutationStrategy(
         model_path=MODEL_PATH,
-        mutation_rate=MUTATION_RATE,
-        use_quantization=USE_QUANTIZATION # Add quantization arg which RLLLMMutation expects
+        # mutation_rate=MUTATION_RATE, <-- Wait, does LLMMutationStrategy take mutation_rate in Init?
+        # Let me check rl_mutation.py again. Steps 1216. 
+        # class LLMMutationStrategy: def __init__(self, model_path, log_file=..., q_table_path=..., use_quantization=...)
+        # It does NOT take mutation_rate in __init__? 
+        # But MutationStrategy (Base) usually takes it.
+        # rl_mutation line 37: def __init__(..., q_table_path=None, use_quantization=True):
+        # NO mutation_rate arg in __init__ signature in Step 1216.
+        # This is a potential bug if Base Class requires it.
+        # But I see super()... wait, Step 1216 snippet didn't show super().__init__.
+        # I remember deleting RLAgent which had complex init.
+        
+        # I should check rl_mutation.py content.
+        use_quantization=USE_QUANTIZATION 
     )
+    mutation.mutation_rate = MUTATION_RATE # Set it manually just in case
 
     engine = GeneticAlgorithmEngine(
         population_size=POPULATION_SIZE,
@@ -117,7 +130,7 @@ def main():
     best_ind = engine.run(num_generations=GENERATIONS, fitness_function=fitness_function)
     
     print("--- Evolution Finished ---")
-    print(f"Best Fitness: {best_ind.fitness}")
+    print(f"Best Fitness: {best_ind.fitness:.4f}")
     
     # 3. Save Results
     # best_code_path = os.path.join(current_dir, "best_fractal_net.py")

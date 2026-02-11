@@ -2,7 +2,7 @@
   "apiVersion": "batch/v1",
   "kind": "Job",
   "metadata": {
-    "name": "nngpt-fractal-evo-01"
+    "name": "nngpt-fractal-meta-evo-01"
   },
   "spec": {
     "parallelism": 1,
@@ -19,7 +19,7 @@
               "-c"
             ],
             "args": [
-              "cd /a/mm && pip install -r requirements.txt && python3 -u -m ab.gpt.brute.ga.modular.run_evolution"
+              "cd /a/mm && pip install -r requirements.txt && python3 -u -m ab.gpt.brute.ga.meta_evolution.meta_evolver"
             ],
             "env": [
               {
@@ -33,6 +33,10 @@
               {
                 "name": "MUTATION_RATE",
                 "value": "0.6"
+              },
+              {
+                "name": "META_ATTEMPTS",
+                "value": "10"
               }
             ],
             "securityContext": {

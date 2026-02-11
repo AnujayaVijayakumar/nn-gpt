@@ -17,7 +17,6 @@ from transformers import (
     AutoConfig,
     PreTrainedTokenizer,
     PreTrainedModel,
-    Mxfp4Config,
 )
 
 

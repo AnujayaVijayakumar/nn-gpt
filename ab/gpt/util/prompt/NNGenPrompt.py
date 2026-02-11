@@ -56,6 +56,7 @@ class NNGenPrompt(Prompt):
             use_delta = key_dict.get('use_delta', False) or 'delta' in key.lower()
             
             for _, row in tqdm(data.iterrows(), total=n_training_prompts or len(data)):
+                # print(f'Row: {row}')
                 if n_training_prompts and len(dataframe) >= n_training_prompts:
                     break
                 para_dict = dict()

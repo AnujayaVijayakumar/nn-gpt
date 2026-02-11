@@ -41,15 +41,17 @@ If there are installation problems, install the dependencies from the 'requireme
 To get the latest code and statistics, install the most recent version of the LEMUR Dataset from GitHub:
 ```bash
 rm -rf db
-pip install --no-cache-dir git+https://github.com/ABrain-One/nn-dataset --upgrade --force --extra-index-url https://download.pytorch.org/whl/cu126
+pip uninstall -y nn-dataset
+pip install --no-cache-dir git+https://github.com/ABrain-One/nn-dataset --extra-index-url https://download.pytorch.org/whl/cu126
 ```
 Installing the stable version:
 ```bash
-pip install nn-dataset --upgrade --extra-index-url https://download.pytorch.org/whl/cu126
+pip uninstall -y nn-dataset 
+pip install nn-dataset --extra-index-url https://download.pytorch.org/whl/cu126
 ```
 Adding functionality to export data to Excel files and generate plots for <a href='https://github.com/ABrain-One/nn-stat'>analyzing neural network performance</a>:
 ```bash
-pip install nn-stat --upgrade --extra-index-url https://download.pytorch.org/whl/cu126
+pip install nn-stat --extra-index-url https://download.pytorch.org/whl/cu126
 ```
 and export/generate:
 ```bash
