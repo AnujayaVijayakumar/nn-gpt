@@ -1,8 +1,8 @@
 """
-Delta-based fine-tuning wrapper for TuneNNGen.
+Delta-based fine-tuning entry point.
 
-This module provides a simple interface for fine-tuning LLMs to generate
-code deltas instead of full neural network code.
+Defaults to deepseek-coder-7b-instruct-v1.5 (paper baseline).
+To use a different model, change llm_conf to any config in ab/gpt/conf/llm/.
 
 Usage:
     python -m ab.gpt.TuneNNGen_delta
@@ -12,22 +12,19 @@ import ab.gpt.TuneNNGen as TuneNNGen
 
 
 def main():
-    """
-    Main entry point for delta-based fine-tuning.
-    
-    Configures TuneNNGen to use delta-specific config files:
-    - NN_gen_delta.json for training prompts
-    - NN_gen_delta.json for generation prompts
-    - improvement_classification_delta as the config key
-    """
     TuneNNGen.main(
-        llm_conf='ds_coder_7b_olympic.json',
+        llm_conf='ds_coder_7b_instruct.json',
         llm_tune_conf='NN_gen_delta.json',
         nn_gen_conf='NN_gen_delta.json',
-        nn_gen_conf_id='improvement_classification_delta'
+        nn_gen_conf_id='improvement_classification_delta',
+        temperature=0.60,
+        top_k=50,
+        top_p=0.9,
+        max_new_tokens=2048,
+        test_nn=10,
+        nn_name_prefix='delta',
     )
 
 
 if __name__ == '__main__':
     main()
-
