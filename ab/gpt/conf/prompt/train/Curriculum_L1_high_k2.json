@@ -1,0 +1,96 @@
+{
+  "curriculum_L1_high_k2": {
+    "type": "curriculum_prompt",
+    "is_generation": false,
+
+    "selection_mode": "tall",
+
+    "task": "img-classification",
+    "dataset": "cifar-10",
+    "metric": "acc",
+
+    "nn_prefixes": [],
+    "num_joint_nns": 2,
+
+    "similarity_mode": "anchor_band_db_minhash",
+    "similarity_band": "high",
+
+    "anchor_strategy": "auto",
+
+    "input_list": [
+      { "para": "dataset", "value": "dataset" },
+      { "para": "task", "value": "task" },
+      { "para": "metric", "value": "metric" },
+      { "para": "epoch", "value": "epoch" },
+
+      { "para": "acc_1", "value": "acc_1" },
+      { "para": "hp_1", "value": "hp_1" },
+      { "para": "tr_1", "value": "tr_1" },
+      { "para": "nn_1", "value": "nn_1" },
+
+      { "para": "acc_2", "value": "acc_2" },
+      { "para": "hp_2", "value": "hp_2" },
+      { "para": "tr_2", "value": "tr_2" },
+      { "para": "nn_2", "value": "nn_2" }
+    ],
+
+    "prompt": [
+    "Your first output character must be '<'.",
+    "Do not write explanations.",
+    "Do not think out loud.",
+    "Do not write analysis.",
+    "Do not write markdown fences.",
+    "",
+    "You are generating one complete evaluator-compatible LEMUR neural network model file for dataset='{dataset}', task='{task}', metric='{metric}', epoch={epoch}.",
+    "",
+    "Reference A is the structural anchor. It is already a valid LEMUR model file.",
+    "Keep the overall evaluator-compatible file structure of Reference A.",
+    "",
+    "The final <nn> code must still contain these top-level items:",
+    "1. imports",
+    "2. def supported_hyperparameters()",
+    "3. class Net(nn.Module)",
+    "4. def train_setup(device)",
+    "5. def learn(data, target, device)",
+    "",
+    "If any of these are missing, the answer is invalid.",
+    "",
+    "Your job is to improve Reference A using useful ideas from Reference B.",
+    "Make a small but meaningful improvement.",
+    "Allowed improvements include:",
+    "- adjusting width or depth",
+    "- improving regularization or normalization",
+    "- improving feature fusion",
+    "- replacing one internal block with a stronger related block",
+    "- improving the training hyperparameters",
+    "",
+    "Do not copy Reference B verbatim.",
+    "Do not output a diff.",
+    "Return the full final updated code.",
+    "",
+    "Return EXACTLY and ONLY these XML blocks in this order:",
+    "<nn>...</nn>",
+    "<hp>...</hp>",
+    "<tr>...</tr>",
+    "",
+    "The <nn> block must be first.",
+    "If the <nn> block is missing, incomplete, or not first, the answer is invalid.",
+    "",
+    "Reference A (structural anchor, accuracy={acc_1}):",
+    "<hp>{hp_1}</hp>",
+    "<tr>{tr_1}</tr>",
+    "<nn>{nn_1}</nn>",
+    "",
+    "Reference B (improvement source, accuracy={acc_2}):",
+    "<hp>{hp_2}</hp>",
+    "<tr>{tr_2}</tr>",
+    "<nn>{nn_2}</nn>"
+  ],
+    "output": [
+      "<nn>{nn_2}</nn>",
+      "<hp>{hp_2}</hp>",
+      "<tr>{tr_2}</tr>"
+    ]
+
+  }
+}
