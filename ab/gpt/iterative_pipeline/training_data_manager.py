@@ -348,7 +348,7 @@ class Net(nn.Module):
     print(json.dumps(chat_example, indent=2))
     
     # Test augmentation
-    output_dir = Path("out/test_training_data")
+    output_dir = out_dir / 'test_training_data'
     stats = manager.augment_training_data([chat_example], cycle=1, output_dir=output_dir)
     print(f"\\nAugmentation stats: {stats}")
     

@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import ab.nn.api as lemur
 import deepspeed
+from ab.nn.util.Const import out_dir
 from ab.nn.util.Util import release_memory, create_file
 from peft import (PeftModel)
 from tqdm import tqdm
@@ -38,7 +39,6 @@ TRANSFORM_RES_DIR = trans_dir / 'result_epoch1'
 
 # Delta mode constants
 _MAX_DELTA_RETRIES = 2
-
 
 
 def apply_sliding_window(example, max_length, stride, tokenizer):
@@ -74,7 +74,7 @@ def flatten_chunks(data):
 
 def tune(test_nn, nn_train_epochs, skip_epoch, llm_path, llm_tune_conf, nn_gen_conf, conf_keys, llm_conf, training_args, peft_config,
          max_prompts=None, save_llm_output=True, max_new_tokens=16 * 1024, nn_name_prefix=None, temperature=1.0, top_k=50, top_p=0.9, test_metric=None,
-         onnx_run=False, trans_mode=False, prompt_batch=1):
+         onnx_run=False, trans_mode=False, prompt_batch=1, use_backbone=False):
     if not isinstance(conf_keys, (list, tuple)):
         conf_keys = (conf_keys,)
     with open(conf_llm_dir / llm_conf) as f:
@@ -91,7 +91,6 @@ def tune(test_nn, nn_train_epochs, skip_epoch, llm_path, llm_tune_conf, nn_gen_c
     else:
         print(f"[EVOLUTION] Using base model from config: {base_model_name}")
 
-
     llm_tune_epochs = int(config['num_epochs'])
     use_deepspeed = config['use_deepspeed']
     only_best_accuracy = config['only_best_accuracy']
@@ -100,6 +99,7 @@ def tune(test_nn, nn_train_epochs, skip_epoch, llm_path, llm_tune_conf, nn_gen_c
     use_unsloth = config.get('use_unsloth', False)
     unsloth_load_in_4bit = config.get('load_in_4bit', True)
     max_new_tokens = config.get('max_new_tokens', max_new_tokens)
+    use_backbone = config.get('backbone', use_backbone)
 
     access_token = None
     if token_from_file:
@@ -107,17 +107,18 @@ def tune(test_nn, nn_train_epochs, skip_epoch, llm_path, llm_tune_conf, nn_gen_c
             access_token = f.readline()
 
     print(f'[DEBUG]Argument Information:\nSkip generation until Epoch: {skip_epoch}\nPath to saved LoRA Layers: {llm_path}')
-    
+
     train_config_path = conf_train_dir / llm_tune_conf
 
     # Load test prompts
     with open(conf_test_dir / nn_gen_conf) as prompt_file:
         prompt_dict = json.load(prompt_file)
     assert isinstance(prompt_dict, dict)
-   
+
     from ab.gpt.util.LLM import LLM
 
     # Load model and tokenizer
+    print(f"[EVOLUTION] Final model path used: {base_model_name}")
     model_loader = LLM(
         base_model_name,
         quantization_config_4bit,
@@ -151,9 +152,11 @@ def tune(test_nn, nn_train_epochs, skip_epoch, llm_path, llm_tune_conf, nn_gen_c
     print('Using Max Length:', model_loader.get_max_length())
 
     # loop train and eval cycles
-    chat_bot = ChatBot(model, tokenizer, temperature=temperature, top_k=top_k, top_p=top_p) # Only initialize ONCE
+    chat_bot = ChatBot(model, tokenizer, temperature=temperature, top_k=top_k, top_p=top_p)  # Only initialize ONCE
 
     shutil.rmtree(epoch_dir(), ignore_errors=True)
+    shutil.rmtree(out_dir / 'nngpt' / 'outputs', ignore_errors=True)
+    for f in (out_dir / 'nngpt').glob("*.json"): f.unlink()
     for epoch in range(llm_tune_epochs):
         print(f'[INFO]Start Epoch {epoch}')
         out_path = epoch_dir(epoch)
@@ -163,8 +166,8 @@ def tune(test_nn, nn_train_epochs, skip_epoch, llm_path, llm_tune_conf, nn_gen_c
             if trans_mode:
                 trans_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict, test_nn, max_new_tokens, save_llm_output, nn_name_prefix)
             else:
-                nn_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict, test_nn, max_new_tokens, save_llm_output, nn_name_prefix, unsloth_max_input_length, prompt_batch)
-                
+                nn_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict, test_nn, max_new_tokens, save_llm_output, nn_name_prefix, unsloth_max_input_length,
+                       prompt_batch, use_backbone=use_backbone)
 
         # fine tune model for 1 epoch / Using training_args and save copy
         print(f'[DEBUG]Perform finetune at epoch {epoch}.')
@@ -172,11 +175,17 @@ def tune(test_nn, nn_train_epochs, skip_epoch, llm_path, llm_tune_conf, nn_gen_c
         # Select data processor based on mode
         if trans_mode:
             data_processor = TransformGenPrompt(
-                context_length if context_length else model_loader.get_max_length(), 
-                tokenizer, 
+                context_length if context_length else model_loader.get_max_length(),
+                tokenizer,
                 train_config_path,
                 TRANSFORM_OUT_DIR,
                 TRANSFORM_RES_DIR
+            )
+        elif use_backbone:
+            from ab.gpt.util.prompt.SFTGenPrompt import SFTGenPrompt
+            data_processor = SFTGenPrompt(
+                context_length if context_length else model_loader.get_max_length(),
+                tokenizer
             )
         else:
             if not use_unsloth:
@@ -192,7 +201,8 @@ def tune(test_nn, nn_train_epochs, skip_epoch, llm_path, llm_tune_conf, nn_gen_c
         release_memory()
 
 
-def nn_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict, test_nn, max_new_tokens, save_llm_output, nn_name_prefix, unsloth_max_input_length, prompt_batch):
+def nn_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict, test_nn, max_new_tokens, save_llm_output, nn_name_prefix, unsloth_max_input_length, prompt_batch,
+           use_backbone=False):
     print('Preparing prompts for generation, this might take a while...')
 
     # Detect delta mode from nn_name_prefix or config key
@@ -213,6 +223,7 @@ def nn_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict, t
         data = lemur.data(only_best_accuracy=True, task=prompt_dict_key['task']).groupby(by='nn').sample(n=1)[:test_nn]
         addon_task = prompt_dict_key.get('addon_task')
         addon_data = lemur.data(only_best_accuracy=True, task=addon_task) if addon_task else None
+        from ab.gpt.util.Util import extract_str
         for _, row in data.iterrows():
             para_dict = dict()
             for it in prompt_dict_key['input_list']:
@@ -254,6 +265,37 @@ def nn_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict, t
 
             # Initial generation
             _, hp, tr, full_out = chat_bot.chat(prompt_text, engineer_prompt=False, max_new_tokens=max_new_tokens)
+
+            if use_backbone:
+                from ab.gpt.util.SFTUtil import skeleton_code
+                import textwrap
+
+                # Extract full blocks (including signatures)
+                block_code = extract_str(full_out, '<block>', '</block>')
+                init_code = extract_str(full_out, '<init>', '</init>')
+                forward_code = extract_str(full_out, '<forward>', '</forward>')
+
+                if block_code and init_code and forward_code:
+                    code = skeleton_code
+
+                    # Replace skeleton signatures with LLM-provided blocks (including signatures)
+                    # Ensure correct indentation for internal methods
+                    sig_block = "def drop_conv3x3_block(in_channels, out_channels, stride=1, padding=1, bias=False, dropout_prob=0.0):"
+                    code = code.replace(sig_block, textwrap.dedent(block_code))
+
+                    sig_init = "    def __init__(self, in_shape: tuple, out_shape: tuple, prm: dict, device: torch.device) -> None:"
+                    code = code.replace(sig_init, textwrap.indent(textwrap.dedent(init_code), "    "))
+
+                    sig_forward = "    def forward(self, x: torch.Tensor, is_probing: bool = False) -> torch.Tensor:"
+                    code = code.replace(sig_forward, textwrap.indent(textwrap.dedent(forward_code), "    "))
+                else:
+                    from ab.gpt.util.Util import extract_code
+                    code = extract_code(full_out)
+
+            if code is None:
+                print(f'[ERROR] No code generated for model B{idx}')
+                continue  # Skip if no code is generated at all
+
             makedirs(model_dir, exist_ok=True)
             if save_llm_output:
                 create_file(model_dir, new_out_file, full_out)
@@ -283,9 +325,9 @@ def nn_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict, t
                 if attempt < _MAX_DELTA_RETRIES:
                     print(f'[WARNING] Delta attempt {attempt + 1} failed for B{idx}: {error_msg} Retrying with feedback...')
                     current_prompt = (
-                        prompt_text
-                        + f'\n\n[SYSTEM FEEDBACK - Attempt {attempt + 1} failed]: {error_msg}'
-                        + '\nPlease correct the delta and output it again.'
+                            prompt_text
+                            + f'\n\n[SYSTEM FEEDBACK - Attempt {attempt + 1} failed]: {error_msg}'
+                            + '\nPlease correct the delta and output it again.'
                     )
 
             # Syntax-repair fallback when all delta attempts fail
@@ -414,10 +456,23 @@ def nn_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict, t
 
     print('[DEBUG] Release memory.')
     release_memory()
+
     if exists(models_dir):
         NNEval.main(nn_name_prefix, nn_train_epochs, epoch)
+
+        # --- Run merge decision after evaluation ---
+        try:
+            from ab.gpt.util.Mergedecision import main as merge
+
+            print(f"[MERGE] Running merge decision for epoch {epoch}")
+            merge()
+
+        except Exception as e:
+            print(f"[MERGE] Merge decision failed: {e}")
+
         print('[DEBUG] Release_memory.')
         release_memory()
+
     print('Clear LEMUR query cache.')
     lemur.data.cache_clear()
     print('The cache has been cleared.')
@@ -428,10 +483,10 @@ def trans_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict
     Transform Script Generation
     """
     print('Running Transform Generation...')
-    
+
     out_gen_dir = str(TRANSFORM_OUT_DIR)
     result_gen_dir = str(TRANSFORM_RES_DIR)
-  
+
     prompts = []
 
     # Load all data from folders to be used for seed prompts
@@ -439,7 +494,7 @@ def trans_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict
     if len(all_data) == 0:
         print("Warning: No data loaded from folders for generation. Skipping.", flush=True)
         return
-        
+
     for key in conf_keys:
         prompt_config = prompt_dict_global[key]
         prompt = ''
@@ -454,13 +509,13 @@ def trans_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict
             data_sample = all_data.sample(n=test_nn)
 
         addon_data = all_data
-        
+
         for _, row in data_sample.iterrows():
             para_dict = dict()
             row_dict = row.to_dict()
             for it in prompt_config['input_list']:
                 para_dict[it['para']] = row_dict.get(it['value'])
-            
+
             # Avoid sampling the same transform
             filtered_addon_data = addon_data.loc[addon_data.id_name != row['id_name']]
             if len(filtered_addon_data) > 0:
@@ -471,15 +526,15 @@ def trans_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict
                 prompts.append((prompt.format(**para_dict), row))
             else:
                 print(f"Warning: Could not find addon data for {row['id_name']}. Skipping prompt.", flush=True)
-                
+
     models_dir = synth_dir(out_path)
-    
+
     for idx, prompt_data in tqdm(enumerate(prompts)):
         model_dir = models_dir / f'B{idx}'
         prompt, origdf = prompt_data
-        
+
         code, hp, tr, full_out = chat_bot.chat(prompt, engineer_prompt=False, max_new_tokens=max_new_tokens)
-        
+
         if save_llm_output: create_file(model_dir, new_out_file, full_out)
         makedirs(model_dir, exist_ok=True)
 
@@ -488,7 +543,7 @@ def trans_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict
             create_file(model_dir, transformer_file, tr)
         else:
             print(f'[ERROR] No code generated for model B{idx}')
-            continue  
+            continue
 
         df_file = model_dir / 'dataframe.df'
         if origdf is None:
@@ -497,7 +552,7 @@ def trans_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict
         else:
             create_file(model_dir, f"original_{origdf['id_name']}.py", origdf['transform_code'])
             origdf.to_pickle(df_file)
-            
+
     print('[DEBUG] Release memory.')
     release_memory()
 
@@ -507,8 +562,8 @@ def trans_gen(epoch, out_path, chat_bot, conf_keys, nn_train_epochs, prompt_dict
             run_eval(epoch_num=epoch, FT_MODE=True)
         except Exception as e:
             print(f"Error running evaluation main(): {e}", flush=True)
-            
+
         print('[DEBUG] Release_memory.')
         release_memory()
-        
+
     print('Folder data reload will occur next epoch.')

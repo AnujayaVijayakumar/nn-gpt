@@ -4,6 +4,45 @@ from typing import Literal
 import torch
 from ab.gpt.util.Const import nngpt_dir, new_out_file, NN_TRAIN_EPOCHS
 
+from ab.nn.util.Const import out_dir
+
+from pathlib import Path
+import json
+from ab.gpt.util.Const import conf_llm_dir
+
+RUN_META = out_dir / 'nngpt' / 'run_config.json'
+
+
+def persist_llm_conf(llm_conf):
+    """Save run configuration including llm_conf and base_model_name."""
+
+
+    if RUN_META.exists():
+        return
+
+    RUN_META.parent.mkdir(parents=True, exist_ok=True)
+
+    # Read base_model_name from llm_conf
+    base_model_name = None
+    llm_conf_path = conf_llm_dir / llm_conf
+
+    if llm_conf_path.exists():
+        try:
+            with open(llm_conf_path) as f:
+                config = json.load(f)
+            base_model_name = config.get("base_model_name")
+        except Exception as e:
+            print(f"Failed to read base_model_name from {llm_conf}: {e}")
+
+    # Save both llm_conf and base_model_name
+    run_config = {"llm_conf": llm_conf}
+    if base_model_name:
+        run_config["base_model_name"] = base_model_name #infers from conf_llm and stores it
+
+    with open(RUN_META, "w") as f:
+        json.dump(run_config, f, indent=2)
+
+    print(f"Run config saved: {RUN_META}")
 # --- Default Evaluation Parameters ---
 # These will be used as defaults for argparse arguments
 START_LAYER = 0
@@ -124,6 +163,7 @@ def main(num_train_epochs=NUM_TRAIN_EPOCHS, lr_scheduler=LR_SCHEDULER, max_grad_
          run_iterative_pipeline=False, cycles=5, models_per_cycle=150, samples_per_prompt=1, accuracy_threshold=0.40,
          min_selected_k=15, fallback_threshold=0.35, adaptive_threshold=False,
          novelty_check=True, resume_from_cycle=None, max_retries=3, use_optimized_training=True):
+    persist_llm_conf(llm_conf)
     # --- Pipeline mode intercept ---
     if run_iterative_pipeline:
         print("--- Initiating Iterative Fine-Tuning Pipeline ---")
@@ -295,22 +335,42 @@ unsloth_opt={unsloth_opt},  trans_mode={trans_mode},  prompt_batch={prompt_batch
         print(f"[WARN] peft_config validation warning: {e}")
         # Don't fail, just warn - actual validation happens when model is loaded
 
-    tune(test_nn, nn_train_epochs, skip_epoches, peft, llm_tune_conf, nn_gen_conf, nn_gen_conf_id, llm_conf, training_args, peft_config,
-         max_prompts=max_prompts, save_llm_output=save_llm_output, max_new_tokens=max_new_tokens, nn_name_prefix=nn_name_prefix,
-         temperature=temperature, top_k=top_k, top_p=top_p, onnx_run=onnx_run, trans_mode=trans_mode, prompt_batch=prompt_batch)
-    # --- Optional post-training merge step ---
-    if enable_merge:
-        print("\n[MERGE] Running auto-merge decision module...\n")
-        from ab.gpt.util.Mergedecision import main as merge
+    from pathlib import Path
+    import subprocess
 
-        try:
-            merge()
-            print("[MERGE] Completed successfully.\n")
-        except Exception as e:
-            print(f"[MERGE] Failed with exit code {e.returncode}")
-            raise
+    try:
+        tune(
+            test_nn, nn_train_epochs, skip_epoches, peft,
+            llm_tune_conf, nn_gen_conf, nn_gen_conf_id, llm_conf,
+            training_args, peft_config,
+            max_prompts=max_prompts,
+            save_llm_output=save_llm_output,
+            max_new_tokens=max_new_tokens,
+            nn_name_prefix=nn_name_prefix,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            onnx_run=onnx_run,
+            trans_mode=trans_mode,
+            prompt_batch=prompt_batch
+        )
 
-    print("\n" + "=" * 70)
+    except KeyboardInterrupt:
+        print("\n[INTERRUPT] Training stopped by user")
+
+    finally:
+        # Safety merge: run merge decision even if training crashes or is interrupted
+        if enable_merge:
+            print("\n[MERGE] Running final merge decision...\n")
+
+            try:
+                from ab.gpt.util.Mergedecision import main as merge
+                merge()
+                print("[MERGE] Completed successfully.\n")
+
+            except Exception as e:
+                print(f"[MERGE] Merge decision failed: {e}")
+
     print("FINE-TUNING CONFIGURATION SUMMARY")
     print("=" * 70)
     print(f"✓ LoRA: r={r}, alpha={lora_alpha}, dropout={lora_dropout}, target={target_modules}")

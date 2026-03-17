@@ -450,7 +450,7 @@ class IterativeFinetuner:
 
         # Find the final checkpoint from fine-tuning
         # TuneNNGen saves to out/qlora-sft/final, but we'll copy it to isolated directory
-        source_checkpoint = Path("out/qlora-sft/final")
+        source_checkpoint = out_dir / 'qlora-sft/final'
         if not source_checkpoint.exists():
             logger.error(f"Checkpoint directory not found: {source_checkpoint}")
             return {

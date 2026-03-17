@@ -1,7 +1,7 @@
 import argparse
 
 from ab.gpt.util.AlterNN import alter
-from ab.gpt.util.Const import nngpt_upload, base_llm
+from ab.gpt.util.Const import nngpt_upload
 
 
 def main():
@@ -11,7 +11,6 @@ def main():
     args = parser.parse_args()
     alter(args.epochs, 'NN_alter.json', 'deepseek-ai/DeepSeek-R1-Distill-Qwen-7B', n=args.num_supporting_models,
           temperature=0.8, top_k=100)
-    #stacked_model = nngpt_upload / base_llm
     #alter(args.epochs, 'NN_alter.json', str(stacked_model), n=args.num_supporting_models, temperature=0.8, top_k=100)
 
 

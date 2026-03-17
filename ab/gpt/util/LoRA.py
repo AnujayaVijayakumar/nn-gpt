@@ -269,7 +269,7 @@ class LoRA:
             # Since chat_template already added special tokens, tokenizer will use add_special_tokens=False internally
             trainer = SFTTrainer(
                 model=self.peft_model,
-                tokenizer=self.tokenizer,
+                processing_class=self.tokenizer,
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
                 args=self.training_args,
